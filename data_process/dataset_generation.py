@@ -17,11 +17,30 @@ import pandas as pd
 import scapy.all as scapy
 from functools import reduce
 from flowcontainer.extractor import extract
+from scapy.all import load_layer
+from scapy.layers.tls.all import TLSClientHello, TLS_Ext_ServerName
 
 random.seed(40)
 
 word_dir = "C:\\ntc\\code\\ET-BERT-main\\corpora"
 word_name = "encrypted_burst.txt"
+
+load_layer("tls")
+
+def mask_sni_in_packet(packet):
+    # 패킷이 Client Hello 메시지와 SNI 확장 필드를 모두 가지고 있는지 확인
+    if packet.haslayer(TLSClientHello) and packet.haslayer(TLS_Ext_ServerName):
+        sni_layer = packet[TLS_Ext_ServerName]
+        try:
+
+            original_sni = sni_layer.servernames[0].servername
+
+            masked_sni = b'\x00' * len(original_sni)
+
+            sni_layer.servernames[0].servername = masked_sni
+        except IndexError:
+            pass
+    return packet
 
 def convert_pcapng_2_pcap(pcapng_path, pcapng_file, output_path):
     
@@ -149,6 +168,7 @@ def get_feature_packet(label_pcap,payload_len):
 
     for packet in packets:
             packet_data = packet.copy()
+            packet_data = mask_sni_in_packet(packet_data)
             data = (binascii.hexlify(bytes(packet_data)))
             packet_string = data.decode()
             new_packet_string = packet_string[76:]
@@ -202,12 +222,14 @@ def get_feature_flow(label_pcap, payload_len, payload_pac):
         packet_count += 1
         if packet_count == payload_pac:
             packet_data = packet.copy()
+            packet_data = mask_sni_in_packet(packet_data)
             data = (binascii.hexlify(bytes(packet_data)))
             packet_string = data.decode()[76:]
             flow_data_string += bigram_generation(packet_string, packet_len=payload_len, flag = True)
             break
         else:
             packet_data = packet.copy()
+            packet_data = mask_sni_in_packet(packet_data)
             data = (binascii.hexlify(bytes(packet_data)))
             packet_string = data.decode()[76:]
             flow_data_string += bigram_generation(packet_string, packet_len=payload_len, flag = True)
