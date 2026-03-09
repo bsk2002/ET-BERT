@@ -21,10 +21,10 @@ import dataset_generation
 import data_preprocess
 import open_dataset_deal
 
-_category = 84 # dataset class
-dataset_dir = "E:\\datasets\\" # the path to save dataset for dine-tuning
+_category = 81 # dataset class
+dataset_dir = "C:\\ntc\\datasets\\" # the path to save dataset for dine-tuning
 
-pcap_path, dataset_save_path, samples, features, dataset_level = "E:\\captures\\splitcap\\", "E:\\datasets\\", [489], ["payload"], "flow"
+pcap_path, dataset_save_path, samples, features, dataset_level = "C:\\ntc\\captures\\splitcap\\", "C:\\ntc\\datasets\\", [489], ["payload"], "flow"
 
 def dataset_extract(model):
     
@@ -32,7 +32,7 @@ def dataset_extract(model):
     Y_dataset = {}
 
     try:
-        if os.listdir(dataset_save_path + "dataset\\"):
+        if os.listdir(dataset_save_path + "dataset\\"): # check .npy files
             print("Reading dataset from %s ..." % (dataset_save_path + "dataset\\"))
             
             x_payload_train, x_payload_test, x_payload_valid,\
@@ -196,7 +196,7 @@ def count_label_number(samples):
     return new_samples
 
 if __name__ == '__main__':
-    open_dataset_not_pcap = 0
+    open_dataset_not_pcap = 0 # pcapng to pcap
     
     if open_dataset_not_pcap:
         #open_dataset_deal.dataset_file2dir(pcap_path)
@@ -207,15 +207,15 @@ if __name__ == '__main__':
                 if '_new.pcap' not in file:
                     os.remove(p+"\\"+file)
 
-    file2dir = 0
+    file2dir = 0 # generation of category directories to store PCAP data
     if file2dir:
         open_dataset_deal.dataset_file2dir(pcap_path)
 
-    splitcap_finish = 0
+    splitcap_finish = 1
     if splitcap_finish:
         samples = count_label_number(samples)
     else:
-        samples = samples * _category
+        samples = samples * _category # [samples, samples, ...]
 
     train_model = ["pre-train"]
     ml_experiment = 0
