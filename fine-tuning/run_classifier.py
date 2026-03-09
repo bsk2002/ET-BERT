@@ -289,13 +289,9 @@ def main():
 
     # Training phase.
     trainset = read_dataset(args, args.train_path)
-    random.shuffle(trainset)
     instances_num = len(trainset)
     batch_size = args.batch_size
     
-    src = torch.LongTensor([example[0] for example in trainset])
-    tgt = torch.LongTensor([example[1] for example in trainset])
-    seg = torch.LongTensor([example[2] for example in trainset])
     if args.soft_targets:
         soft_tgt = torch.FloatTensor([example[3] for example in trainset])
     else:
@@ -327,6 +323,12 @@ def main():
 
     for epoch in tqdm.tqdm(range(1, args.epochs_num + 1)):
         model.train()
+        
+        random.shuffle(trainset)
+        src = torch.LongTensor([example[0] for example in trainset])
+        tgt = torch.LongTensor([example[1] for example in trainset])
+        seg = torch.LongTensor([example[2] for example in trainset])
+        
         for i, (src_batch, tgt_batch, seg_batch, soft_tgt_batch) in enumerate(batch_loader(batch_size, src, tgt, seg, soft_tgt)):
             loss = train_model(args, model, optimizer, scheduler, src_batch, tgt_batch, seg_batch, soft_tgt_batch)
             total_loss += loss.item()
