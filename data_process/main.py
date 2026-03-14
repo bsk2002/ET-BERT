@@ -21,10 +21,11 @@ import dataset_generation
 import data_preprocess
 import open_dataset_deal
 
-_category = 81 # dataset class
-dataset_dir = "C:\\ntc\\datasets\\" # the path to save dataset for dine-tuning
+_category = 77 # dataset class
+dataset_dir = "E:\\pre-data\\fine-tuning-for-tls-version\\datasets\\"
+# dataset_dir = "C:\\ntc\\datasets\\" # the path to save dataset for dine-tuning
 
-pcap_path, dataset_save_path, samples, features, dataset_level = "C:\\ntc\\captures\\splitcap\\", "C:\\ntc\\datasets\\", [489], ["payload"], "flow"
+pcap_path, dataset_save_path, samples, features, dataset_level = "E:\\pre-data\\fine-tuning-for-tls-version\\captures\\splitcap\\", "E:\\pre-data\\fine-tuning-for-tls-version\\datasets\\", [489], ["payload"], "flow"
 
 def dataset_extract(model):
     
