@@ -18,29 +18,43 @@ import scapy.all as scapy
 from functools import reduce
 from flowcontainer.extractor import extract
 from scapy.all import load_layer
-from scapy.layers.tls.all import TLSClientHello, TLS_Ext_ServerName
+from scapy.layers.tls.all import TLSClientHello, TLSServerHello, TLS_Ext_KeyShare, TLS_Ext_ServerName, TLS 
 
 random.seed(40)
 
-word_dir = "C:\\ntc\\code\\ET-BERT-main\\corpora"
+word_dir = "E:\\code\\ET-BERT-main\\corpora"
 word_name = "encrypted_burst.txt"
 
 load_layer("tls")
 
-def mask_sni_in_packet(packet):
-    # 패킷이 Client Hello 메시지와 SNI 확장 필드를 모두 가지고 있는지 확인
-    if packet.haslayer(TLSClientHello) and packet.haslayer(TLS_Ext_ServerName):
-        sni_layer = packet[TLS_Ext_ServerName]
-        try:
+def mask_tcp_and_tls(packet):
+    """
+    TCP 헤더 마스킹 및 TLS Key Share Extension 제거
+    """
+    if packet.haslayer(scapy.TCP):
+        packet = packet[scapy.TCP].payload
 
-            original_sni = sni_layer.servernames[0].servername
+    for hello_layer in [TLSClientHello, TLSServerHello]:
+        if packet.haslayer(hello_layer):
+            hello = packet[hello_layer]
 
-            masked_sni = b'\x00' * len(original_sni)
+            if hasattr(hello, 'random_bytes'): 
+                hello.gmt_unix_time = 0
+                hello.random_bytes = b''
+            
+            if hasattr(hello, 'sid'): 
+                hello.sidlen = 0
+                hello.sid = b''
 
-            sni_layer.servernames[0].servername = masked_sni
-        except IndexError:
-            pass
+            # Extension 리스트에서 Key Share(type 51) 제외
+            if hasattr(hello, 'ext') and hello.ext:
+                hello.ext = [e for e in hello.ext if getattr(e, 'type', -1) != 51]
+        
+    packet.show()
     return packet
+
+def extract_processed_hex(packet):
+    return binascii.hexlify(bytes(packet)).decode()
 
 def convert_pcapng_2_pcap(pcapng_path, pcapng_file, output_path):
     
@@ -167,11 +181,8 @@ def get_feature_packet(label_pcap,payload_len):
     packet_data_string = ''  
 
     for packet in packets:
-            packet_data = packet.copy()
-            packet_data = mask_sni_in_packet(packet_data)
-            data = (binascii.hexlify(bytes(packet_data)))
-            packet_string = data.decode()
-            new_packet_string = packet_string[76:]
+            processed_packet = mask_tcp_and_tls(packet.copy())
+            new_packet_string = extract_processed_hex(processed_packet)
             packet_data_string += bigram_generation(new_packet_string, packet_len=payload_len, flag = True)
             break
 
@@ -179,65 +190,51 @@ def get_feature_packet(label_pcap,payload_len):
     return feature_data
 
 def get_feature_flow(label_pcap, payload_len, payload_pac):
-    
     feature_data = []
-    packets = scapy.rdpcap(label_pcap)
-    packet_count = 0  
-    flow_data_string = '' 
-
-    feature_result = extract(label_pcap, filter='tcp', extension=['ssl.record.content_type', 'ssl.record.opaque_type', 'ssl.handshake.type'])
-    if len(feature_result) == 0:
-        feature_result = extract(label_pcap, filter='udp')
-        if len(feature_result) == 0:
-            return -1
-        extract_keys = list(feature_result.keys())[0]
-        if len(feature_result[label_pcap, extract_keys[1], extract_keys[2]].ip_lengths) < 3:
-            print("preprocess flow %s but this flow has less than 3 packets." % label_pcap)
-            return -1
-    elif len(packets) < 3:
-        print("preprocess flow %s but this flow has less than 3 packets." % label_pcap)
-        return -1
     try:
-        if len(feature_result[label_pcap, 'tcp', '0'].ip_lengths) < 3:
-            print("preprocess flow %s but this flow has less than 3 packets." % label_pcap)
-            return -1
-    except Exception as e:
-        print("*** this flow begings from 1 or other numbers than 0.")
-        for key in feature_result.keys():
-            if len(feature_result[key].ip_lengths) < 3:
-                print("preprocess flow %s but this flow has less than 3 packets." % label_pcap)
-                return -1
-
-    if feature_result.keys() == {}.keys():
+        packets = scapy.rdpcap(label_pcap)
+    except:
         return -1
-    
-    if feature_result == {}:
-        return -1
-    feature_result_lens = len(feature_result.keys())
-    for key in feature_result.keys():
-        value = feature_result[key]
 
-    packet_index = 0
+    flow_data_string = ''
+    client_ip = None
+    target_ack = -1
+    server_hello_found = False
+    packet_count = 0 
+
     for packet in packets:
-        packet_count += 1
-        if packet_count == payload_pac:
-            packet_data = packet.copy()
-            packet_data = mask_sni_in_packet(packet_data)
-            data = (binascii.hexlify(bytes(packet_data)))
-            packet_string = data.decode()[76:]
-            flow_data_string += bigram_generation(packet_string, packet_len=payload_len, flag = True)
+        if scapy.IP not in packet or packet_count >= payload_pac:
             break
-        else:
-            packet_data = packet.copy()
-            packet_data = mask_sni_in_packet(packet_data)
-            data = (binascii.hexlify(bytes(packet_data)))
-            packet_string = data.decode()[76:]
-            flow_data_string += bigram_generation(packet_string, packet_len=payload_len, flag = True)
-    feature_data.append(flow_data_string)
+            
+        if client_ip is None:
+            client_ip = packet[scapy.IP].src
 
+        # 1. ServerHello 포착 시 종료 지점(target_ack) 계산
+        if packet.haslayer(TLSServerHello):
+            server_hello_found = True
+            if packet.haslayer(scapy.TCP):
+                # ServerHello의 Seq + Payload 길이를 다음 ACK 번호로 설정
+                target_ack = packet[scapy.TCP].seq + len(packet[scapy.TCP].payload)
+
+        # 2. 전처리 및 토큰화
+        processed_packet = mask_tcp_and_tls(packet.copy())
+        payload_hex = extract_processed_hex(processed_packet)    
+
+        if payload_hex:
+            packet_tokens = bigram_generation(payload_hex, packet_len=payload_len)
+            flow_data_string += packet_tokens.strip() + " [SEP] "
+            packet_count += 1
+
+        # 3. 종료 조건: ServerHello를 봤고, 클라이언트가 그에 대응하는 ACK를 보냈을 때
+        if server_hello_found and packet[scapy.IP].src == client_ip:
+            if packet.haslayer(scapy.TCP) and (packet[scapy.TCP].flags & 0x10): # ACK flag 체크
+                if packet[scapy.TCP].ack >= target_ack:
+                    break
+
+    feature_data.append(flow_data_string.strip())
     return feature_data
 
-def generation(pcap_path, samples, features, splitcap = False, payload_length = 128, payload_packet = 5, dataset_save_path = "E:\\ex_results\\", dataset_level = "flow"):
+def generation(pcap_path, samples, features, splitcap = False, payload_length = 128, payload_packet = 10, dataset_save_path = "E:\\ex_results\\", dataset_level = "flow"):
     if os.path.exists(dataset_save_path + "dataset.json"):
         print("the pcap file of %s is finished generating."%pcap_path)
         
@@ -288,6 +285,7 @@ def generation(pcap_path, samples, features, splitcap = False, payload_length = 
     for parent, dirs, files in os.walk(pcap_path):
         if label_name_list == []:
             label_name_list.extend(dirs)
+            label_name_list.sort() # 디렉토리 이름을 숫자 및 알파벳 순서로 정렬
 
         tls13 = 0
         if tls13:
